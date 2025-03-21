@@ -1,0 +1,233 @@
+---
+title: "Sleep Study"
+author: "Johanna Wahn"
+output:
+  html_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(png)
+library(grid)
+img <- readPNG("IMG_3053.png")
+```
+
+## Why we are doing this study?
+```{r Pomi Image, echo=F}
+grid.raster(img)
+```
+
+*This is a study case used as a capstone for the Google Data Analytics certificate*
+**Problem**: My favorite activity in the world is sleeping. Could I optimize it by controlling the different variables that might affect it?
+
+
+**Solution**: Let's dive into a sleeping study to discover which variables will improve or ruin a good night sleep!
+
+## Statistical Information
+
+```{r Load Packages, echo=T, results='hide'}
+library(tidyverse)
+library(ggplot2)
+library(patchwork)
+```
+
+```{r Read Data}
+data <- read.csv("sleepdata.csv")
+head(data)
+```
+
+```{r }
+summary(data)
+```
+```{r null values}
+#Number of null values per column
+colSums(is.na(data))
+```
+```{r average age and BMI per gender}
+gen_avg <- data %>% 
+  group_by(Gender) %>%
+  summarise(mean_age = mean(Age), n = n())
+
+gen_avg
+```
+The average age of Women is higher. This could skew the data as age could be an important factor in sleep quality. But we do have a 50/50 gender representation.
+
+## Exploratory Data Analysis (EDA)
+
+``` {r Exploratory graphs}
+data$Sleep.Disorder = factor(data$Sleep.Disorder, levels = c('None','Insomnia','Sleep Apnea'))
+
+df <- data %>% 
+  group_by(Sleep.Disorder) %>% # Variable to be transformed
+  count() %>% 
+  ungroup() %>% 
+  mutate(perc = `n` / sum(`n`)) %>% 
+  arrange(perc) %>%
+  mutate(labels = scales::percent(perc))
+
+ggplot(df, aes(x = "", y = perc, fill = Sleep.Disorder)) +
+  geom_col() +
+  geom_label(aes(label = labels), color = "black",
+            position = position_stack(vjust = 0.5),
+            show.legend = FALSE) +
+  scale_fill_brewer(palette = "Reds") +  
+  coord_polar("y", start = 0) +  
+  theme_void() +
+  ggtitle("Percentage of Sleep Disorders") +
+  theme(plot.title = element_text(hjust=0.5))
+
+
+```
+
+We do not have an equal representation of every sleep class, but we almost have a 60/40 representation of healthy and disease respectively.
+
+```{r BMI}
+data$BMI.Category <- gsub("Normal Weight", "Normal", data$BMI.Category)
+data$BMI.Category <- factor(data$BMI.Category, labels=c('Normal','Overweight','Obese'))
+
+bmi_bar <- ggplot(data, aes(x=BMI.Category, fill=Sleep.Disorder)) +
+  scale_fill_brewer(palette="Reds") +
+  geom_bar() +
+  ggtitle("BMI effect on Sleep") +
+  theme(plot.title = element_text(hjust=0.5))
+bmi_bar
+```
+
+We cleaned up this column by merging "Normal" and "Normal Weight" samples. The overweight category seems severely under represented. 
+
+A conclusion we can pull from this figure is that BMI is correlated with sleep quality A higher BMI tends to indicate insomnia and sleep apnea, while in the lowest BMI category has a majority of normal sleep. Obese class has almost 50/50 split on both sleep disorders. We cannot make an conclusions on the Overweight category due to the small sample size but it does seem to indicate a correlation with sleep disorders.
+
+```{r Occupation}
+occup_point <- ggplot(data, aes(x=Occupation, y=Stress.Level)) +
+  geom_point(aes(fill=Sleep.Disorder,size=Age), color='black', shape=21, stroke=0.4) +
+  scale_fill_brewer(palette="Reds") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=0.5),
+        plot.margin = margin(t = 5, r = 10, b = 5, l = 10),
+        axis.title.x = element_text(margin = margin(t = 20)),
+        plot.title = element_text(hjust=0.5)) +
+  ggtitle("Occupation effect on Sleep") 
+
+occup_bar <- ggplot(data, aes(x=Occupation, fill=Sleep.Disorder)) +
+  geom_bar() +
+  scale_fill_brewer(palette="Reds")+
+  ggtitle("Occupation, Age and Stress effect on Sleep") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=0.7),
+        plot.margin = margin(t = 5, r = 10, b = 5, l = 10),
+        axis.title.x = element_text(margin = margin(t = 20)),
+        plot.title = element_text(hjust=0.5)) 
+
+occup_bar + occup_point
+```
+
+
+```{r Blood ranges}
+BP_ranges = c('Normal', 'Elevated', 'Hypertension_1', 'Hypertension_2', 'Hypertensive_Crisis')
+BP_systolic_limits = list(c(0,120),c(120,130),c(130,140),c(140,180),c(180,200))
+BP_diastolic_limits = list(c(0,80),c(0,80),c(80,90),c(90,120),c(120,140))
+
+data <- data %>%
+  separate(Blood.Pressure, into=c('Systolic','Diastolic'), sep="/") %>%
+  mutate(Systolic = as.numeric(Systolic),
+         Diastolic = as.numeric(Diastolic)) %>%
+  mutate(BP_range = case_when(
+    between(Systolic, BP_systolic_limits[[1]][1], BP_systolic_limits[[1]][2]) & 
+      between(Diastolic, BP_diastolic_limits[[1]][1], BP_diastolic_limits[[1]][2]) ~ BP_ranges[1],
+    
+    between(Systolic, BP_systolic_limits[[2]][1], BP_systolic_limits[[2]][2]) & 
+      between(Diastolic, BP_diastolic_limits[[2]][1], BP_diastolic_limits[[2]][2]) ~ BP_ranges[2],
+    
+    between(Systolic, BP_systolic_limits[[3]][1], BP_systolic_limits[[3]][2]) & 
+      between(Diastolic, BP_diastolic_limits[[3]][1], BP_diastolic_limits[[3]][2]) ~ BP_ranges[3],
+    
+    between(Systolic, BP_systolic_limits[[4]][1], BP_systolic_limits[[4]][2]) & 
+      between(Diastolic, BP_diastolic_limits[[4]][1], BP_diastolic_limits[[4]][2]) ~ BP_ranges[4],
+    
+    between(Systolic, BP_systolic_limits[[5]][1], BP_systolic_limits[[5]][2]) & 
+      between(Diastolic, BP_diastolic_limits[[5]][1], BP_diastolic_limits[[5]][2]) ~ BP_ranges[5],
+    
+    TRUE ~ "Unknown" # Default case
+  ))
+
+
+# New values to replace "Unknown"
+replacement_values <- c(rep("Elevated", 12), rep("Hypertension_1", 2), "Elevated")
+
+data <- data %>%
+  mutate(BP_range = replace(BP_range, BP_range == "Unknown", replacement_values)) %>%
+  mutate(Heart.Rate = as.factor(Heart.Rate))
+
+data$Heart.Rate <- as.numeric(as.character(data$Heart.Rate))
+# Group by BP_range and Heart.Rate, then count occurrences
+data_grouped <- data %>%
+  group_by(BP_range, Heart.Rate, Sleep.Disorder, Age) %>%
+  summarise(Count = n(), .groups = "drop")  # Count occurrences of each Heart Rate
+
+# Convert BP_range into a factor with the specified order
+data_grouped$BP_range <- factor(data_grouped$BP_range, levels = BP_ranges)
+
+blood_bar <- ggplot(data_grouped, aes(x = BP_range, y = Count, fill = Heart.Rate)) +
+  geom_col() +  
+  scale_fill_viridis_c(option = "magma", direction = -1) +  
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+blood_bar
+```
+
+We separated the "Blood.Pressure" column into "Systolic" (#/) and "Diastolic" (/#) categories and then depending on their combination create a categorical blood pressure range column: "BP_range" from the [AHA](https://www.heart.org/en/health-topics/high-blood-pressure/understanding-blood-pressure-readings) . We manually clean up the "Unknown" ranges by making assumptions (putting more importance on the systolic number) and assigning them a category.
+
+```{r}
+blood_sleep <- ggplot(data_grouped, aes(x=BP_range, y=Heart.Rate)) + 
+  geom_point(aes(fill=Sleep.Disorder,size=Age), color='black', shape=21, stroke=0.4 ) + 
+  scale_fill_brewer(palette="Reds") 
+
+blood_sleep
+```
+
+```{r Sport and Stress}
+data <- data %>% 
+  mutate(Stress.Level = as.factor(Stress.Level))
+
+act_bar <- ggplot(data, aes(x=Physical.Activity.Level,y=Daily.Steps)) +
+  geom_point(aes(fill=Stress.Level, size=Age), color='black', shape=21, stroke=0.4) +
+  scale_fill_brewer(palette="Reds") +
+  geom_smooth(method=lm,  linetype="dashed",
+              color="darkred")
+
+act_bar
+```
+
+```{r Sleep duration and quality}
+
+sleep_q <- ggplot(data, aes(x=Sleep.Duration,y=Quality.of.Sleep)) +
+  geom_point(aes(fill=Sleep.Disorder), color='black', shape=21, stroke=0.4, size=3) +  
+  scale_fill_brewer(palette="Reds")
+
+sleep_q
+```
+
+```{r Gender}
+
+gend_group <- data %>%
+  group_by(Gender,Sleep.Disorder,Age)
+
+gender_bar <- ggplot(data, aes(x=Gender, y=Age, fill=Sleep.Disorder)) +
+  scale_fill_brewer(palette="Reds") +
+  geom_bar(stat="summary", fun.y = "mean", position="dodge")
+
+gender_bar 
+```
+
+## Conclusions 
+
+
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
