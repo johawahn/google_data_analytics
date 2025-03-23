@@ -8,6 +8,7 @@ output:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+knitr::opts_chunk$set(fig.align="center")
 library(png)
 library(grid)
 img <- readPNG("IMG_3053.png")
@@ -30,6 +31,7 @@ grid.raster(img)
 library(tidyverse)
 library(ggplot2)
 library(patchwork)
+library(ggpubr)
 ```
 
 ```{r Read Data}
@@ -82,6 +84,41 @@ ggplot(df, aes(x = "", y = perc, fill = Sleep.Disorder)) +
 
 We do not have an equal representation of every sleep class, but we almost have a 60/40 representation of healthy and disease respectively.
 
+```{r Quality of Sleep}
+my_comparisons <- list( c("None", "Insomnia"), 
+                        c("Insomnia", "Sleep Apnea"), 
+                        c("None", "Sleep Apnea") )
+
+ggplot(data, aes(x=Sleep.Disorder, y=Quality.of.Sleep, fill=Sleep.Disorder)) +
+  geom_boxplot()+
+  geom_jitter(shape=16, position=position_jitter(0.2)) +
+  scale_fill_brewer(palette="Reds") +
+  stat_summary(fun = "mean", geom = "point", shape = 8,
+               size = 2, color = "white")+ 
+  stat_compare_means(comparisons = my_comparisons)+ # Add pairwise comparisons p-value
+  stat_compare_means(label.y = 12) + # Add global p-value
+  ggtitle("Quality fo Sleep score distribution \n per Sleep Disorder") +
+  theme(plot.title = element_text(hjust=0.5))     
+```
+
+The average quality of aleep score for a person without a disorder is ~7.5. Sleep apnea does not seem to be correlated with a lower quality of sleep, we can see no significant difference between the Sleep Apnea and No Disorder classes. Insomnia is the only class where we see a significant loss in quality of sleep. The quality of sleep metric seems to be very subjective as it does not definitely indicate a sleep disorder or not.
+
+```{r Gender}
+
+gend_group <- data %>%
+  group_by(Gender,Sleep.Disorder,Age)
+
+gender_bar <- ggplot(data, aes(x=Gender, y=Age, fill=Sleep.Disorder)) +
+  scale_fill_brewer(palette="Reds") +
+  geom_bar(stat="summary", fun.y = "mean", position="dodge") +
+  ggtitle("Sleep Disorders per Gender")+
+  theme(plot.title = element_text(hjust=0.5))     
+
+gender_bar 
+```
+
+As stated before, the female group has a higher average age and seems more affected by sleep apnea that the male group, while the male group seems the most affected by insomnia. 
+
 ```{r BMI}
 data$BMI.Category <- gsub("Normal Weight", "Normal", data$BMI.Category)
 data$BMI.Category <- factor(data$BMI.Category, labels=c('Normal','Overweight','Obese'))
@@ -96,9 +133,15 @@ bmi_bar
 
 We cleaned up this column by merging "Normal" and "Normal Weight" samples. The overweight category seems severely under represented. 
 
-A conclusion we can pull from this figure is that BMI is correlated with sleep quality A higher BMI tends to indicate insomnia and sleep apnea, while in the lowest BMI category has a majority of normal sleep. Obese class has almost 50/50 split on both sleep disorders. We cannot make an conclusions on the Overweight category due to the small sample size but it does seem to indicate a correlation with sleep disorders.
+A conclusion we can pull from this figure is that BMI is correlated with sleep quality. A higher BMI tends to indicate insomnia and/or sleep apnea, while in the lowest BMI category has a majority of normal sleep. Obese class has almost 50/50 split on both sleep disorders. We cannot make an conclusions on the Overweight category due to the small sample size but it does seem to indicate a correlation with sleep disorders.
 
-```{r Occupation}
+```{r Occupation and Stress, fig.width=12, fig.height=6}
+data_stress <- data %>%
+  group_by(Occupation) %>%
+  summarize(avg_stress = mean(Stress.Level),
+            avg_age = mean(Age),
+            count = n())
+  
 occup_point <- ggplot(data, aes(x=Occupation, y=Stress.Level)) +
   geom_point(aes(fill=Sleep.Disorder,size=Age), color='black', shape=21, stroke=0.4) +
   scale_fill_brewer(palette="Reds") +
@@ -106,26 +149,29 @@ occup_point <- ggplot(data, aes(x=Occupation, y=Stress.Level)) +
         plot.margin = margin(t = 5, r = 10, b = 5, l = 10),
         axis.title.x = element_text(margin = margin(t = 20)),
         plot.title = element_text(hjust=0.5)) +
-  ggtitle("Occupation effect on Sleep") 
+  ggtitle("Occupation, Age and Stress \n effect on Sleep") 
 
 occup_bar <- ggplot(data, aes(x=Occupation, fill=Sleep.Disorder)) +
   geom_bar() +
   scale_fill_brewer(palette="Reds")+
-  ggtitle("Occupation, Age and Stress effect on Sleep") +
+  ggtitle("Occupation \n effect on Sleep") +
   theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=0.7),
         plot.margin = margin(t = 5, r = 10, b = 5, l = 10),
         axis.title.x = element_text(margin = margin(t = 20)),
         plot.title = element_text(hjust=0.5)) 
 
-occup_bar + occup_point
-```
+print(data_stress)
 
+occup_bar + occup_point + plot_layout(widths = c(1, 1))
+```
+The occupations with the highest stress scores seem to be the most correlated with sleep disorders, as illustrated by Sales representative, Salespersons and Scientists, especially causing sleep apnea. The occupations with a lower average stress score but a higher age group average, like nurses and teachers, also show an increase in the number of sleep disorders, even when the stress score is on the low end (see Nurses with score of 3).
 
 ```{r Blood ranges}
 BP_ranges = c('Normal', 'Elevated', 'Hypertension_1', 'Hypertension_2', 'Hypertensive_Crisis')
 BP_systolic_limits = list(c(0,120),c(120,130),c(130,140),c(140,180),c(180,200))
 BP_diastolic_limits = list(c(0,80),c(0,80),c(80,90),c(90,120),c(120,140))
 
+# Categorize into BP ranges depending on the systolic and diastolic values 
 data <- data %>%
   separate(Blood.Pressure, into=c('Systolic','Diastolic'), sep="/") %>%
   mutate(Systolic = as.numeric(Systolic),
@@ -169,65 +215,84 @@ data_grouped$BP_range <- factor(data_grouped$BP_range, levels = BP_ranges)
 blood_bar <- ggplot(data_grouped, aes(x = BP_range, y = Count, fill = Heart.Rate)) +
   geom_col() +  
   scale_fill_viridis_c(option = "magma", direction = -1) +  
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))+
+  ggtitle("Heart rate of \n of blood pressure ranges") +
+  theme(plot.title = element_text(hjust=0.5))
 
 blood_bar
 ```
 
-We separated the "Blood.Pressure" column into "Systolic" (#/) and "Diastolic" (/#) categories and then depending on their combination create a categorical blood pressure range column: "BP_range" from the [AHA](https://www.heart.org/en/health-topics/high-blood-pressure/understanding-blood-pressure-readings) . We manually clean up the "Unknown" ranges by making assumptions (putting more importance on the systolic number) and assigning them a category.
+We separated the "Blood.Pressure" column into "Systolic" (#/) and "Diastolic" (/#) categories and then depending on their combination create a categorical blood pressure range column: "BP_range" from the [American Heart Association](https://www.heart.org/en/health-topics/high-blood-pressure/understanding-blood-pressure-readings) . We manually clean up the "Unknown" ranges by making assumptions (putting more importance on the systolic number) and assigning them a category.
 
-```{r}
+As expected, we can see an increase in heart rate with each blood pressure range. 
+
+```{r BP and Heart Rate}
+data_grouped$Sleep.Disorder = factor(data_grouped$Sleep.Disorder, levels = 
+                                       c('None','Insomnia','Sleep Apnea'))
+
 blood_sleep <- ggplot(data_grouped, aes(x=BP_range, y=Heart.Rate)) + 
-  geom_point(aes(fill=Sleep.Disorder,size=Age), color='black', shape=21, stroke=0.4 ) + 
-  scale_fill_brewer(palette="Reds") 
+  geom_jitter(aes(fill=Sleep.Disorder,size=Age), color='black', 
+              shape=21, stroke=0.4, width=0.3) + 
+  scale_fill_brewer(palette="Reds") +
+  ggtitle("Effect of BP range, Heart Rate \n and Age on Sleep") +
+  theme(plot.title = element_text(hjust=0.5))
 
 blood_sleep
 ```
+We see an evident correlation between hypertension and sleep disorders. Regardless of age, a lower heart rate and a normal BP range indicates a lower propensity to sleep disorders, while the hypertension I and II have a higher proportion of insomnia and sleep apnea, with hypertension II being almost exclusively being sleep apnea. An elevated BP does not seem correlated with sleep disorders.
 
-```{r Sport and Stress}
+```{r Sport and Stress, fig.width=12, fig.height=6}
 data <- data %>% 
   mutate(Stress.Level = as.factor(Stress.Level))
 
 act_bar <- ggplot(data, aes(x=Physical.Activity.Level,y=Daily.Steps)) +
-  geom_point(aes(fill=Stress.Level, size=Age), color='black', shape=21, stroke=0.4) +
+  geom_jitter(aes(size=Age, fill=Stress.Level), color='black', shape=21, stroke=0.4) +
+  scale_fill_brewer(palette="Blues") +
+  geom_smooth(method=lm,  linetype="dashed",
+              color="darkblue")
+
+act_stress_bar <- ggplot(data, aes(x=Physical.Activity.Level,y=Daily.Steps)) +
+  geom_jitter(aes(fill=Sleep.Disorder, size=Age), color='black', shape=21, stroke=0.4) +
   scale_fill_brewer(palette="Reds") +
   geom_smooth(method=lm,  linetype="dashed",
               color="darkred")
-
-act_bar
+act_bar + act_stress_bar + plot_layout(widths = c(1, 1))
 ```
 
+We see a really strong correlation between physical activity and daily steps with the stress level, the lower the physical activity and daily steps, the higher the stress level the person feels regardless of their age. We see a couple of outliers where the stress levels are high at the top right (highest number of steps with highest activity level). As seen by the following table:
+
+```{r Stress, Activity and Steps}
+data %>%
+  group_by(Occupation, Stress.Level) %>%
+  summarise(avg_steps = mean(Daily.Steps),
+            avg_activity = mean(Physical.Activity.Level))
+```
+
+The higher number of steps could be a result of the job and not a result of leisure sport, especially with nurses who have the highest number of steps over all the other occupations (8058 steps).
+
+Insomnia seems to be correlated with a lower level of physical, while sleep apnea does not follow this pattern. The latter one seems to mainly affect older people regardless of the physical activity.
+
+I
 ```{r Sleep duration and quality}
 
 sleep_q <- ggplot(data, aes(x=Sleep.Duration,y=Quality.of.Sleep)) +
-  geom_point(aes(fill=Sleep.Disorder), color='black', shape=21, stroke=0.4, size=3) +  
+  geom_jitter(aes(fill=Sleep.Disorder), color='black', 
+              shape=21, stroke=0.4, size=3, width=0.5) +  
   scale_fill_brewer(palette="Reds")
 
 sleep_q
 ```
 
-```{r Gender}
+## Conclusions 
 
-gend_group <- data %>%
-  group_by(Gender,Sleep.Disorder,Age)
+**The goal of this study case was to use data analytics to derive insights, however I want to also apply some machine learning to obtain an order of feature importance and to see if this data is enough to predict a sleep disorder**
 
-gender_bar <- ggplot(data, aes(x=Gender, y=Age, fill=Sleep.Disorder)) +
-  scale_fill_brewer(palette="Reds") +
-  geom_bar(stat="summary", fun.y = "mean", position="dodge")
+## Pre-processing data
 
-gender_bar 
-```
+## Regression model
+
 
 ## Conclusions 
 
 
 
-## Including Plots
-
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
-```
-
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
