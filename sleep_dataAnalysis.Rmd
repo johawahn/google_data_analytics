@@ -20,7 +20,8 @@ grid.raster(img)
 ```
 
 *This is a study case used as a capstone for the Google Data Analytics certificate*
-**Problem**: My favorite activity in the world is sleeping. Could I optimize it by controlling the different variables that might affect it?
+
+**Problem**: My favorite activity in the world to do with my cat is sleeping. Could I optimize it by controlling the different variables that might affect it?
 
 
 **Solution**: Let's dive into a sleeping study to discover which variables will improve or ruin a good night sleep!
@@ -29,9 +30,12 @@ grid.raster(img)
 
 ```{r Load Packages, echo=T, results='hide'}
 library(tidyverse)
+library(dplyr)
 library(ggplot2)
 library(patchwork)
 library(ggpubr)
+library(GGally)
+library(caret)
 ```
 
 ```{r Read Data}
@@ -42,10 +46,16 @@ head(data)
 ```{r }
 summary(data)
 ```
+
 ```{r null values}
 #Number of null values per column
 colSums(is.na(data))
 ```
+
+```{r Unique IDs}
+length(unique(data$Person.ID)) == nrow(data)
+```
+
 ```{r average age and BMI per gender}
 gen_avg <- data %>% 
   group_by(Gender) %>%
@@ -249,13 +259,18 @@ act_bar <- ggplot(data, aes(x=Physical.Activity.Level,y=Daily.Steps)) +
   geom_jitter(aes(size=Age, fill=Stress.Level), color='black', shape=21, stroke=0.4) +
   scale_fill_brewer(palette="Blues") +
   geom_smooth(method=lm,  linetype="dashed",
-              color="darkblue")
+              color="darkblue") +
+  ggtitle("Effect of Physical Activity, \n Daily Steps and Age on Stress") +
+  theme(plot.title = element_text(hjust=0.5))
 
 act_stress_bar <- ggplot(data, aes(x=Physical.Activity.Level,y=Daily.Steps)) +
   geom_jitter(aes(fill=Sleep.Disorder, size=Age), color='black', shape=21, stroke=0.4) +
   scale_fill_brewer(palette="Reds") +
   geom_smooth(method=lm,  linetype="dashed",
-              color="darkred")
+              color="darkred")+
+  ggtitle("Effect of Physical Activity, \n Daily Steps and Age on Sleep") +
+  theme(plot.title = element_text(hjust=0.5))
+
 act_bar + act_stress_bar + plot_layout(widths = c(1, 1))
 ```
 
@@ -272,27 +287,135 @@ The higher number of steps could be a result of the job and not a result of leis
 
 Insomnia seems to be correlated with a lower level of physical, while sleep apnea does not follow this pattern. The latter one seems to mainly affect older people regardless of the physical activity.
 
-I
 ```{r Sleep duration and quality}
 
 sleep_q <- ggplot(data, aes(x=Sleep.Duration,y=Quality.of.Sleep)) +
   geom_jitter(aes(fill=Sleep.Disorder), color='black', 
               shape=21, stroke=0.4, size=3, width=0.5) +  
-  scale_fill_brewer(palette="Reds")
+  scale_fill_brewer(palette="Reds") +
+  ggtitle("Effect of Sleep Duration and \n Quality of Sleep on Sleep Disorders") +
+  theme(plot.title = element_text(hjust=0.5))
 
 sleep_q
 ```
 
+Quality of sleep seems to be strongly correlated with sleep duration. As expected insomnia is correlated with a lower sleep duration and quality of sleep. Sleep apnea does not seem to be correlated with neither sleep duration nor sleep quality, we find sleep anea in both high and low quality of sleep score ranges as well as short and long sleep duration. As quality of sleep is a subjective measure if the sleep apnea is mild it might not affect the person itself (maybe only those around them lol).
+
+```{r Correlation}
+library(corrplot)
+
+# Compute correlation matrix (only for numeric variables)
+numeric_data <- data[sapply(data, is.numeric)]
+numeric_data <- numeric_data[2:ncol(numeric_data)]
+cor_matrix <- cor(numeric_data, use="complete.obs")
+
+# Visualize using corrplot
+corrplot(cor_matrix, method="color", type="upper", 
+         col= colorRampPalette(c("blue", "white", "red"))(200),
+         tl.col="black", tl.srt=45)  # Adjust label angle
+```
+
 ## Conclusions 
 
-**The goal of this study case was to use data analytics to derive insights, however I want to also apply some machine learning to obtain an order of feature importance and to see if this data is enough to predict a sleep disorder**
+We have a variety of variables affecting sleep disorders. Some of them are inevitable such as age or gender. Older folks and women seem to have a higher correlation with sleep apnea and insomnia. However some of the variables we have a say over, such as BMI, physical activity, stress levels and occupation (maybe this last one is not so easy a change). All of the aforementioned variables are also strongly correlated with each other. Higher physical activity also means lower stress and blood pressure ,in addition we could hypothesize a lower BMI. Improving all these variables would inversely correlate with sleep disorders. 
+
+**The goal of this study case was to use data analytics to derive insights, however I want to also apply some machine learning to obtain an order of feature importance and to see if this data is enough to predict a sleep disorder and to push myself to perform some ML in R instead of my usual python.**
 
 ## Pre-processing data
 
-## Regression model
+- Unique IDs will be deleted
+- Gender will become a binary variable
+- Ordinal Categorical values will be transformed to integers (Sleep.Disorder)
+- Nominal Categorical values (Occupation, BMI.Category, BP_range) will be one shot encoded or label encoded
+- Blood.Pressure will be divided into systolic and diastolic values
+- The rest of the values will be standardized as needed
+
+```{r ML preprocessing}
+df <- data %>%
+  select(!c(Person.ID)) %>%
+  mutate(
+    Gender = if_else(data$Gender == "Female", 0, 1), #Female=0, Male=1,
+    Occupation = as.integer(factor(data$Occupation)),
+    BMI.Category = as.integer(factor(data$BMI.Category)),
+    BP_range = as.integer(factor(BP_range)),
+    Stress.Level = as.integer(Stress.Level)
+  )
+
+```
+
+We now check the distributions of the numeric variables that will maybe need to be standardized: Sleep Duration, Quality of Sleep, Physical Activity, 
+
+```{r Check distributions 1, fig.width=12, fig.height=6}
+
+age <- ggplot(data, aes(x=Age)) + geom_histogram() 
+sleepdur <- ggplot(data, aes(x=Sleep.Duration)) + geom_histogram() 
+sleepqual <- ggplot(data, aes(x=Quality.of.Sleep)) + geom_histogram() 
+
+age+sleepdur+sleepqual+ plot_layout(widths = c(1, 1,1))
+
+```
+
+```{r Check distributions 2, fig.width=12, fig.height=6}
+
+phy <- ggplot(data, aes(x=Physical.Activity.Level)) + geom_histogram() 
+stress <- ggplot(data, aes(x=Stress.Level)) + geom_histogram(stat="count") 
+sys <- ggplot(data, aes(x=Systolic)) + geom_histogram() 
+
+phy+stress+sys+plot_layout(widths = c(1, 1,1))
+```
+
+```{r Check distributions 3, fig.width=12, fig.height=6}
+
+dia <- ggplot(data, aes(x=Diastolic)) + geom_histogram() 
+hr <- ggplot(data, aes(x=Heart.Rate)) + geom_histogram() 
+ds <- ggplot(data, aes(x=Daily.Steps)) + geom_histogram() 
+
+dia+hr+ds+ plot_layout(widths = c(1, 1,1))
+```
+
+We have really uneven distributions for the data, but due to the small number of samples I do not want to manipulate the data too much and skew the results. We will use a random forrest model that does not require standardisation of the input data.
+
+```{r Train/Test split}
+set.seed(123)  # For reproducibility
+split <- createDataPartition(df$Sleep.Disorder, p = 0.8, list = FALSE)
+
+train_data <- df[split, ]
+test_data  <- df[-split, ]
+```
+
+```{r Random Forrest Model}
+# Convert target variable to factor (for classification)
+train_data$Sleep.Disorder <- as.factor(train_data$Sleep.Disorder)
+test_data$Sleep.Disorder  <- as.factor(test_data$Sleep.Disorder)
+
+# Set up training control with cross-validation
+train_control <- trainControl(method = "cv", number = 5)  
+
+# Train Random Forest model
+model <- train(Sleep.Disorder ~ ., data = train_data,
+               method = "rf",  
+               trControl = train_control,
+               tuneLength = 5)  
+
+# View model details
+print(model)
+
+# Make predictions
+predictions <- predict(model, newdata = test_data)
+
+# Evaluate accuracy
+conf_matrix <- confusionMatrix(predictions, test_data$Sleep.Disorder)
+print(conf_matrix)
+```
 
 
 ## Conclusions 
 
+The model can predict a sleep disorder with a 93% accuracy. We do note an imbalance in sensitivity between the different groups but as seeing as there is a very imbalanced number of samples for each group this was to be expected. 
 
+```{r Pomi Image 2, echo=F}
+img <- readPNG("pom_reading.png")
+grid.raster(img)
+```
 
+Dr. Pomelo revising my script.
